@@ -20,11 +20,12 @@ The goals / steps of this project are the following:
 [image1]: ./examples/visualization.jpg "Visualization"
 [image2]: ./examples/brightness.png "Brighten"
 [image3]: ./examples/rotation.png "Rotation"
-[image4]: ./examples/placeholder.png "Traffic Sign 1"
-[image5]: ./examples/placeholder.png "Traffic Sign 2"
-[image6]: ./examples/placeholder.png "Traffic Sign 3"
-[image7]: ./examples/placeholder.png "Traffic Sign 4"
-[image8]: ./examples/placeholder.png "Traffic Sign 5"
+[image4]: ./examples/80.png "Traffic Sign 1"
+[image5]: ./examples/pedestrians.png "Traffic Sign 2"
+[image6]: ./examples/dangerous_left.png "Traffic Sign 3"
+[image7]: ./examples/turn_right.png "Traffic Sign 4"
+[image8]: ./examples/yield.png "Traffic Sign 5"
+[image9]: ./examples/model.jpg "Model Behavior"
 
 ## Rubric Points
 ### Here I will consider the [rubric points](https://review.udacity.com/#!/rubrics/481/view) individually and describe how I addressed each point in my implementation.  
@@ -34,7 +35,7 @@ The goals / steps of this project are the following:
 
 #### 1. Provide a Writeup / README that includes all the rubric points and how you addressed each one. You can submit your writeup as markdown or pdf. You can use this template as a guide for writing the report. The submission includes the project code.
 
-You're reading it! and here is a link to my [project code](https://github.com/udacity/CarND-Traffic-Sign-Classifier-Project/blob/master/Traffic_Sign_Classifier.ipynb)
+You're reading it! and here is a link to my [project code](https://github.com/Angelenos/CarND-Term1/blob/master/CarND-Traffic-Sign-Classifier-Project/Traffic_Sign_Classifier.ipynb)
 
 ### Data Set Summary & Exploration
 
@@ -113,16 +114,8 @@ L2 Regularization was also introduced for each layer in the fully connected netw
 #### 4. Describe the approach taken for finding a solution and getting the validation set accuracy to be at least 0.93. Include in the discussion the results on the training, validation and test sets and where in the code these were calculated. Your approach may have been an iterative process, in which case, outline the steps you took to get to the final solution and why you chose those steps. Perhaps your solution involved an already well known implementation or architecture. In this case, discuss why you think the architecture is suitable for the current problem.
 
 My final model results were:
-* training set accuracy of ?
-* validation set accuracy of ? 
-* test set accuracy of ?
-
-If an iterative approach was chosen:
-* What was the first architecture that was tried and why was it chosen?
-* What were some problems with the initial architecture?
-* How was the architecture adjusted and why was it adjusted? Typical adjustments could include choosing a different model architecture, adding or taking away layers (pooling, dropout, convolution, etc), using an activation function or changing the activation function. One common justification for adjusting an architecture would be due to overfitting or underfitting. A high accuracy on the training set but low accuracy on the validation set indicates over fitting; a low accuracy on both sets indicates under fitting.
-* Which parameters were tuned? How were they adjusted and why?
-* What are some of the important design choices and why were they chosen? For example, why might a convolution layer work well with this problem? How might a dropout layer help with creating a successful model?
+* validation set accuracy of 0.961 
+* test set accuracy of 0.945
 
 If a well known architecture was chosen:
 * What architecture was chosen?
@@ -133,7 +126,9 @@ In this project LeNet ConvNet model is selected.
 
 Rationality for selecting LeNet is based on its original application: Character recognition from small images. LeNet has been proved to ensure both simplicity and accuracy in identifing limited number of patterns within a smail image, which is exactly the case for traffic sign identification. The only concern is that traffic sign contains color information, and under certain circumstances color will be essential for traffic sign identification. However from the result it is proved that the original LeNet is able to achieve high accuracy even when dealing with higher complexity like color information. On the other hand, it is also believed that introducing more layers in the convolution layer or full connection layers may potentially increase the overall accuracy further.
 
+It can be verified from the behavior of model. Accuracy rise rapidly in the first 10 epochs and reached 0.9 after 7th epoch. Since Adam optimizer is able to adjust learning rate based on the rate with which the loss is changed, the model slowly reached 0.961 accuracy in the next 18 epochs and the test data gave 94.5% overall accuracy, which indicated the model passed the requirement of this project (93%). Model files are included in the Github folder for reference.
 
+![alt text][image9]
 
 ### Test a Model on New Images
 
