@@ -74,8 +74,6 @@ Here is an example of an original image and an augmented image:
 
 ![alt text][image3]
 
-The difference between the original data set and the augmented data set is the following ... 
-
 
 #### 2. Describe what your final model architecture looks like including model type, layers, layer sizes, connectivity, etc.) Consider including a diagram and/or table describing the final model.
 
@@ -92,10 +90,10 @@ My final model consisted of the following layers:
 | Average pooling	      	| 2x2 stride,  outputs 5x5x16				|
 | Fully connected		| Input = 400, Output = 120		|
 | RELU					|												|
-| Dropout					|			keep probability = 0.75			|
+| Dropout					|			keep probability = 0.7			|
 | Fully connected		| Input = 120, Output = 84		|
 | RELU					|												|
-| Dropout					|			keep probability = 0.75			|
+| Dropout					|			keep probability = 0.7			|
 | Fully connected		| Input = 84, Output = 43		|
 | Softmax				| |
  
