@@ -33,6 +33,7 @@ My project includes the following [files](https://github.com/Angelenos/CarND-Ter
 * drive.py for driving the car in autonomous mode
 * model.h5 containing a trained convolution neural network 
 * writeup.md or writeup_report.pdf summarizing the results
+* run.mp4 the video of model simulation
 
 #### 2. Submission includes functional code
 Using the Udacity provided simulator and my drive.py file, the car can be driven autonomously around the track by executing 
