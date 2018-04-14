@@ -63,14 +63,15 @@ dist_coef = 0
 ksize = 5
 window_width = 50
 window_height = 80
-margin = 100
 lane_width = 680  # Default lane width at bottom of the image in pixels
+line_width = 26  # Default line width at bottom of the image in pixels
+margin = 2 * line_width
 ym_per_pix = 30/720  # meters per pixel in y dimension
 xm_per_pix = 3.7/700  # meters per pixel in x dimension
 curv_thresh = 0.1  # Curvature threshold for lane validation
 fit_thresh = 0.1  # Fit threshold for lane validation
 src_pts = np.float32([(237, 690), (1043, 690), (601, 445), (678, 445)])  # Ref pts for Perspective transformation
-dst_pts = np.float32([(250, 720), (1030, 720), (300, 0), (980, 0)])  # Ref pts for Perspective transformation
+dst_pts = np.float32([(300, 720), (980, 720), (300, 0), (980, 0)])  # Ref pts for Perspective transformation
 lane_left = Line()
 lane_right = Line()
 
@@ -142,13 +143,13 @@ def lane_filter(image):
     mag_binary = mag_thresh(gray, sobel_kernel=ksize, thresh=(35, 255))
     dir_binary = dir_threshold(gray, sobel_kernel=ksize, thresh=(0.75, 1.4))
     his_binary = hls_select(image, thresh=(160, 255))
-    cv2.imwrite('output_images/debug/grad.jpg', (gradx & grady) * 255)
-    cv2.imwrite('output_images/debug/mag.jpg', mag_binary * 255)
-    cv2.imwrite('output_images/debug/dir.jpg', dir_binary * 255)
-    cv2.imwrite('output_images/debug/hls.jpg', his_binary * 255)
+    # cv2.imwrite('output_images/debug/grad.jpg', (gradx & grady) * 255)
+    # cv2.imwrite('output_images/debug/mag.jpg', mag_binary * 255)
+    # cv2.imwrite('output_images/debug/dir.jpg', dir_binary * 255)
+    # cv2.imwrite('output_images/debug/hls.jpg', his_binary * 255)
     combined = np.zeros_like(dir_binary)
     combined[((gradx == 1) & (grady == 1)) | ((mag_binary == 1) & (dir_binary == 1)) | (his_binary == 1)] = 1
-    cv2.imwrite('output_images/debug/filter.jpg', combined * 255)
+    # cv2.imwrite('output_images/debug/filter.jpg', combined * 255)
     return combined
 
 
@@ -237,9 +238,9 @@ def slide_windows(image):
         lane_left.line_base_pos = (lane_left.current_fit[0] * (720 * ym_per_pix) ** 2) + \
                                   (lane_left.current_fit[1] * 720 * ym_per_pix) + \
                                   (lane_left.current_fit[2] - 300 * ym_per_pix)
-        lane_right.line_base_pos = (1280 * xm_per_pix) - \
-                                   (lane_right.current_fit[0] * (720 * ym_per_pix) ** 2) - \
-                                   (lane_right.current_fit[1] * 720 * ym_per_pix) - lane_right.current_fit[2]
+        lane_right.line_base_pos = (lane_right.current_fit[0] * (720 * ym_per_pix) ** 2) + \
+                                   (lane_right.current_fit[1] * 720 * ym_per_pix) + \
+                                   (lane_right.current_fit[2] - 980 * ym_per_pix)
 
 
 def lane_valid():
@@ -285,13 +286,13 @@ def pipeline(image):
 
     # 2nd stage, filter out the possible lanes in the images
     filtered = lane_filter(undist)
-    cv2.imwrite('output_images/debug/filter.jpg', filtered*255)
+    # cv2.imwrite('output_images/debug/filter.jpg', filtered*255)
 
     # 3rd stage, apply perspective transform to the image
     M = cv2.getPerspectiveTransform(src_pts, dst_pts)
     M_inv = cv2.getPerspectiveTransform(dst_pts, src_pts)
     warped = cv2.warpPerspective(filtered, M, (filtered.shape[1], filtered.shape[0]), flags=cv2.INTER_LINEAR)
-    cv2.imwrite('output_images/debug/warped.jpg', warped * 255)
+    # cv2.imwrite('output_images/debug/warped.jpg', warped * 255)
 
     # 4th stage, Adopt convolution method to determine details about lane
     slide_windows(warped)
@@ -301,7 +302,7 @@ def pipeline(image):
 
     # 6th stage, draw lanes on the warped images
     lanes = lane_plot((warped.shape[0], warped.shape[1], 3))
-    cv2.imwrite('output_images/debug/lanes.jpg', lanes)
+    # cv2.imwrite('output_images/debug/lanes.jpg', lanes)
 
     # 7th stages, apply reverse perspective transform to get images with detected lanes and statistics plotted
     lanes_unwarped = cv2.warpPerspective(lanes, M_inv, (lanes.shape[1], lanes.shape[0]), flags=cv2.INTER_LINEAR)
@@ -353,7 +354,7 @@ if __name__ == "__main__":
             print('Can''t find images')
             sys.exit(-1)
     elif '.mp4' in file_input[-1]:
-        clip1 = VideoFileClip(file_input)
+        clip1 = VideoFileClip(f_input)
         lane_clip = clip1.fl_image(pipeline)
         lane_clip.write_videofile(output_file, audio=False)
     else:
