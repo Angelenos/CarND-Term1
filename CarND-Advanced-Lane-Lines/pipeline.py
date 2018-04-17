@@ -1,7 +1,14 @@
-# Udacity Autonomous Driving Nano Degree Term 1 Project 4: Advanced Lane Finding
-# Created by Fengwen Song
-# This is the implementation of image processing pipe line
+################################################################################################
+######## Udacity Autonomous Driving Nano Degree Term 1 Project 4: Advanced Lane Finding ########
+########                             Created by Fengwen Song                            ########
+################################################################################################
+# This is the implementation of image processing pipe-line
+# Please run the function by calling python pipeline.py + input file + output folder, here input file can be video
+# in mp4 format or image in jpg format. Output folder is where the processed file will be stored. Output file will be
+# Under this folder with "out_" + original file name
+# Program tested on personal laptop with Intel 6820HK CPU + Nvidia GTX980 Graphic Card
 
+# Import relevant modules
 import cv2
 import sys
 import pickle
@@ -14,6 +21,8 @@ class Line:
     def __init__(self):
         # was the line detected in the last iteration?
         self.detected = False
+        # will this frame of video/image be skipped?
+        self.skip = False
         # x values of the last n fits of the line
         self.recent_xfitted = []
         # average x values of the fitted line over the last n iterations
@@ -37,24 +46,25 @@ class Line:
 
 
 # Definition of hyper parameters
-cam_mtx = 0
-dist_coef = 0
-ksize = 5
-window_width = 40
-window_height = 80
+cam_mtx = 0  # Pre-definition of camera matrix
+dist_coef = 0  # Pre-definition of distortion coefficients
+ksize = 5  # Kernel size used in sobel operator
+window_width = 40  # Width of the convolution window in pixels
+window_height = 80  # Window height during window slidings
 line_width = 24  # Default line width at bottom of the image in pixels
-margin = 8 * line_width
+margin = 8 * line_width  # Margin during window sliding to indicate the possible location of the adjacent lane segment
 src_pts = np.float32([(237, 690), (1043, 690), (682, 450), (590, 450)])  # Ref pts for Perspective transformation
 dst_pts = np.float32([(325, 720), (955, 720), (955, 0), (300, 0)])  # Ref pts for Perspective transformation
 lane_width = dst_pts[1][0] - dst_pts[0][0]  # Default lane width at bottom of the image in pixels
 ym_per_pix = 30 / dst_pts[0][1]  # meters per pixel in y dimension
 xm_per_pix = 3.7 / lane_width  # meters per pixel in x dimension
 curv_thresh = 3  # Curvature threshold for lane validation
-fit_thresh = 11  # Fit threshold for lane validation
+fit_thresh = 6  # Threshold when compared the 2nd order polynomial coefficients with the previous fit
 lane_thresh = 200  # Valid lane threshold after convolution
 res_thresh = 3000  # Threshold for the residual after polynomial fit
-num_it = 6  # Store result from last 5 iterations
+num_it = 6  # Store result from last 6 iterations
 num_layer = 9  # Default number of sliding layers
+# Line objectes for left and right lanes
 lane_left = Line()
 lane_right = Line()
 
@@ -111,16 +121,19 @@ def dir_threshold(img, sobel_kernel=3, thresh=(0, np.pi / 2)):
 
 
 def hls_select(img, thresh=(0, 255)):
+    # 1) Convert image in RGB to HLS color space
     hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS)
+    # 2) Pick the S channel
     s_channel = hls[:, :, 2]
+    # 3) Make a gray scale copy of the source image
     binary_output = np.zeros_like(s_channel)
+    # 4) Apply the threshold to the source image
     binary_output[(s_channel > thresh[0]) & (s_channel <= thresh[1])] = 1
     return binary_output
 
 
 def curvature_cal(x, y):
-    if len(x) != len(y):
-        print('No!!!')
+    # Function to calculate the curvature given x and y value in pixels
     fit = np.polyfit(y * ym_per_pix, x * xm_per_pix, 2)
     curv = ((1 + (2 * fit[0] * dst_pts[0][1] * ym_per_pix + fit[1]) ** 2) ** 1.5) / np.absolute(2 * fit[0])
     return curv
@@ -134,20 +147,16 @@ def lane_filter(image):
     mag_binary = mag_thresh(gray, sobel_kernel=ksize, thresh=(60, 255))
     dir_binary = dir_threshold(gray, sobel_kernel=ksize, thresh=(0.8, 1.4))
     hls_binary = hls_select(image, thresh=(160, 255))
-    cv2.imwrite('output_images/debug/grad.jpg', (gradx & grady) * 255)
-    cv2.imwrite('output_images/debug/mag.jpg', mag_binary * 255)
-    cv2.imwrite('output_images/debug/dir.jpg', dir_binary * 255)
-    cv2.imwrite('output_images/debug/hls.jpg', hls_binary * 255)
     combined = np.zeros_like(dir_binary)
+    # Combine results from all detection results above
+    # Here results from gradx, grady, mag_binary and dir_binary are calculated by operation "and" and then take "or"
+    # operation with the results from "HLS_binary" to give as clean result as possible
     combined[((gradx == 1) & (grady == 1) & (mag_binary == 1) & (dir_binary == 1)) | (hls_binary == 1)] = 1
-    cv2.imwrite('output_images/debug/filter.jpg', combined * 255)
     return combined
 
 
 def slide_windows(image):
     window = np.ones(window_width)  # Create our window template that we will use for convolutions
-    draw_image = np.zeros((image.shape[0], image.shape[1], 3)) + 255  # Debug
-    draw_image[image == 1] = (0, 0, 255)  # Debug
     # First find the two starting positions for the left and right lane by using np.sum to get the vertical image slice
     # and then np.convolve the vertical image slice with the window template
     # Sum quarter bottom of image to get slice, could use a different ratio
@@ -169,8 +178,6 @@ def slide_windows(image):
         if lane_left.detected or lane_right.detected:
             l_center = int(dst_pts[0][0])
             r_center = int(dst_pts[1][0])
-    draw_image = cv2.circle(draw_image, (int(l_center), 720), int(line_width / 2), color=(255, 0, 0), thickness=6)  # Debug
-    draw_image = cv2.circle(draw_image, (int(l_center), 720), int(line_width / 2), color=(255, 0, 0), thickness=6)  # Debug
 
     lane_left.allx = np.array([l_center], dtype=float)
     lane_right.allx = np.array([r_center], dtype=float)
@@ -219,12 +226,12 @@ def slide_windows(image):
                     r_center = l_center + lane_width
             elif (r_center - l_center <= lane_width * 0.85) or (r_center - l_center >= lane_width * 1.15):
                 if lane_left.bestx is not None and lane_right.bestx is not None:
-                    l_center_pred = lane_left.best_fit[0] * (image.shape[0] - level * window_height) ** 2 + \
-                                    lane_left.best_fit[1] * (image.shape[0] - level * window_height) + \
-                                    lane_left.best_fit[2]
-                    r_center_pred = lane_right.best_fit[0] * (image.shape[0] - level * window_height) ** 2 + \
-                                    lane_right.best_fit[1] * (image.shape[0] - level * window_height) + \
-                                    lane_right.best_fit[2]
+                    l_center_pred = (lane_left.best_fit[0] * (image.shape[0] - level * window_height) ** 2) + \
+                                    (lane_left.best_fit[1] * (image.shape[0] - level * window_height)) + \
+                                    (lane_left.best_fit[2])
+                    r_center_pred = (lane_right.best_fit[0] * (image.shape[0] - level * window_height) ** 2) + \
+                                    (lane_right.best_fit[1] * (image.shape[0] - level * window_height)) + \
+                                    (lane_right.best_fit[2])
                     if np.abs(l_center_pred - l_center) > np.abs(r_center_pred - r_center):
                         l_center = int(l_center_pred)
                     else:
@@ -239,20 +246,21 @@ def slide_windows(image):
             lane_right.allx = np.append(lane_right.allx, [float(r_center)])
             lane_left.ally = np.append(lane_left.ally, [float(image.shape[0] - level * window_height)])
             lane_right.ally = np.append(lane_right.ally, [float(image.shape[0] - level * window_height)])
-        draw_image = cv2.circle(draw_image, (int(l_center), image.shape[0] - level * window_height),
-                                int(line_width / 2), color=(255, 0, 0), thickness=6)  # Debug
-        draw_image = cv2.circle(draw_image, (int(r_center), image.shape[0] - level * window_height),
-                                int(line_width / 2), color=(255, 0, 0), thickness=6)  # Debug
 
-    cv2.imwrite('output_images\debug\\warped_pts.jpg', draw_image)
-    # If any of the lane is detected
-    if len(lane_right.allx) == len(lane_left.allx) == num_layer:
+    # This is the primary sanity check integrated in the window sliding
+    if len(lane_right.allx) == len(lane_left.allx) == num_layer:  # If each sliding layer gives valid result
+        # Mark both lanes as "detected"
         lane_left.detected = True
         lane_right.detected = True
+        # Adopt full 2nd order polynomial fit. Results contains info such as coefficients and residues used to evaluate
+        # the validity of fitting
         fit_left = np.polyfit(lane_left.ally, lane_left.allx, 2, full=True)
         fit_right = np.polyfit(lane_right.ally, lane_right.allx, 2, full=True)
+        # If large residue was found, which indicates poor fitting results
         if (fit_left[1][0] > res_thresh or fit_right[1][0] > res_thresh) and \
                 len(lane_left.current_fit) == len(lane_right.current_fit) > 0:
+            # If previous valid result has been stored, marked lane as "not detected" and lane_valid() function
+            # will apply fix to this result
             lane_left.detected = False
             lane_right.detected = False
         else:
@@ -266,28 +274,25 @@ def slide_windows(image):
             lane_right.current_fit = fit_right[0]
             lane_left.radius_of_curvature = curvature_cal(lane_left.allx, lane_left.ally)
             lane_right.radius_of_curvature = curvature_cal(lane_right.allx, lane_right.ally)
-    else:
+    else:  # If any of the sliding layer can't give results for either lane
+        # Marked lane as "not detected" and lane_valid() function will apply fix to this result
         lane_left.detected = False
         lane_right.detected = False
 
 
 def lane_valid():
     # Function to check the sanity of lane detection results
+    # If the lane detection result passed the primary sanity check during window sliding
     if lane_left.detected is True and lane_right.detected is True:
         curv_left = lane_left.radius_of_curvature
         curv_right = lane_right.radius_of_curvature
-        fit_left = lane_left.current_fit
-        fit_right = lane_right.current_fit
         curv_comp = np.max([np.abs((curv_left - curv_right)/curv_left), np.abs((curv_left - curv_right)/curv_right)])
-        fit_comp = np.max([np.abs((fit_left[0] - fit_right[0])/fit_left[0]),
-                           np.abs((fit_left[0] - fit_right[0])/fit_right[0])])
         fit_diff = np.max([np.abs(lane_left.diffs[0] / (lane_right.diffs[0] + 1e-7)),
                           np.abs(lane_right.diffs[0] / (lane_left.diffs[0] + 1e-7))])
         res = (curv_comp < curv_thresh) & (fit_diff < fit_thresh)
 
-        if res:
-            # Check if length of Line.allx list is the same as number of layers. If not use the average polynomial fit
-            # to estimate the missing items
+        if res:  # Lane detected passes the sanity check.
+            # Append the detected x values into the recent fit list
             if len(lane_left.recent_xfitted) < num_it:
                 lane_left.recent_xfitted.append(lane_left.allx)
                 lane_left.recent_fit.append(lane_left.current_fit)
@@ -304,27 +309,44 @@ def lane_valid():
                 lane_right.recent_xfitted.append(lane_right.allx)
                 lane_right.recent_fit.pop(0)
                 lane_right.recent_fit.append(lane_right.current_fit)
+            # Re-calculate bestx by averaging the updated recent fit list
             lane_left.bestx = np.mean(lane_left.recent_xfitted, axis=0)
             lane_right.bestx = np.mean(lane_right.recent_xfitted, axis=0)
+            # Calculate the average formula from the recent "num_it" valid detection results
             lane_left.best_fit = np.mean(lane_left.recent_fit, axis=0)
             lane_right.best_fit = np.mean(lane_right.recent_fit, axis=0)
+            # Use the average formula to smooth the detected result
             lane_left.current_fit = lane_left.best_fit
             lane_right.current_fit = lane_right.best_fit
-        else:
+        else:  # Lane detected fails the sanity check.
+            # Set boolen value of detected as False as a reminder for the next loop
             lane_left.detected = lane_right.detected = False
+            # Replace the detected x value with the average one from previous valid results
             lane_left.allx = np.int_(lane_left.bestx)
             lane_right.allx = np.int_(lane_right.bestx)
             lane_left.ally = np.linspace(dst_pts[0][1], window_height, num_layer)
             lane_right.ally = np.linspace(dst_pts[0][1], window_height, num_layer)
+            # Replace the polynomial fitted formula with the average one from previous valid results
             lane_left.current_fit = lane_left.best_fit
             lane_right.current_fit = lane_right.best_fit
+            # Re-calculate the difference between coefficients from current fit and previous one
             lane_left.diffs = [lane_left.best_fit - lane_left.recent_fit[-1][i]
                                for i in range(len(lane_left.best_fit))]
             lane_right.diffs = [lane_right.best_fit - lane_right.recent_fit[-1][i]
                                 for i in range(len(lane_right.best_fit))]
+            # Re-calculate the radius of curvature
             lane_left.radius_of_curvature = curvature_cal(lane_left.allx, lane_left.ally)
             lane_right.radius_of_curvature = curvature_cal(lane_right.allx, lane_right.ally)
-    else:
+        # Calculate the line base position with the detected/recovered results
+        lane_left.line_base_pos = ((lane_left.current_fit[0] * (dst_pts[0][1] ** 2)) +
+                                   (lane_left.current_fit[1] * dst_pts[0][1]) +
+                                   (lane_left.current_fit[2] - dst_pts[0][0])) * xm_per_pix
+        lane_right.line_base_pos = ((lane_right.current_fit[0] * (dst_pts[0][1] ** 2)) +
+                                    (lane_right.current_fit[1] * dst_pts[0][1]) +
+                                    (lane_right.current_fit[2] - dst_pts[1][0])) * xm_per_pix
+    else:  # If the results even fails the primary sanity check during window sliding
+        # If this is not the first frame of the video/image, adopt the same method as the fail case during sanity check
+        # above
         if len(lane_left.recent_fit) == len(lane_right.recent_fit) > 0:
             lane_left.allx = np.int_(lane_left.bestx)
             lane_right.allx = np.int_(lane_right.bestx)
@@ -334,14 +356,16 @@ def lane_valid():
             lane_right.current_fit = lane_right.best_fit
             lane_left.radius_of_curvature = curvature_cal(lane_left.allx, lane_left.ally)
             lane_right.radius_of_curvature = curvature_cal(lane_right.allx, lane_right.ally)
-        else:
-            return
-    lane_left.line_base_pos = ((lane_left.current_fit[0] * (dst_pts[0][1] ** 2)) +
-                               (lane_left.current_fit[1] * dst_pts[0][1]) +
-                               (lane_left.current_fit[2] - dst_pts[0][0])) * xm_per_pix
-    lane_right.line_base_pos = ((lane_right.current_fit[0] * (dst_pts[0][1] ** 2)) +
-                                (lane_right.current_fit[1] * dst_pts[0][1]) +
-                                (lane_right.current_fit[2] - dst_pts[1][0])) * xm_per_pix
+            # Calculate the line base position with the recovered results
+            lane_left.line_base_pos = ((lane_left.current_fit[0] * (dst_pts[0][1] ** 2)) +
+                                       (lane_left.current_fit[1] * dst_pts[0][1]) +
+                                       (lane_left.current_fit[2] - dst_pts[0][0])) * xm_per_pix
+            lane_right.line_base_pos = ((lane_right.current_fit[0] * (dst_pts[0][1] ** 2)) +
+                                        (lane_right.current_fit[1] * dst_pts[0][1]) +
+                                        (lane_right.current_fit[2] - dst_pts[1][0])) * xm_per_pix
+        else:  # If it is the first frame of the video/image, skip this frame
+            lane_left.skip = True
+            lane_left.skip = True
 
 
 def lane_plot(shape):
@@ -375,13 +399,11 @@ def pipeline(image):
 
     # 2nd stage, filter out the possible lanes in the images
     filtered = lane_filter(undist)
-    cv2.imwrite('output_images/debug/filter.jpg', filtered*255)
 
     # 3rd stage, apply perspective transform to the image
     M = cv2.getPerspectiveTransform(src_pts, dst_pts)
     M_inv = cv2.getPerspectiveTransform(dst_pts, src_pts)
     warped = cv2.warpPerspective(filtered, M, (filtered.shape[1], filtered.shape[0]), flags=cv2.INTER_LINEAR)
-    cv2.imwrite('output_images/debug/warped.jpg', warped * 255)
 
     # 4th stage, Adopt convolution method to determine details about lane
     slide_windows(warped)
@@ -389,31 +411,37 @@ def pipeline(image):
     # 5th stage, compare the left and right lane to see if they are realistic
     lane_valid()
 
-    # 6th stage, draw lanes on the warped images
-    lanes = lane_plot((warped.shape[0], warped.shape[1], 3))
-    cv2.imwrite('output_images/debug/lanes.jpg', lanes)
+    # If the frame will not be skipped
+    if not (lane_left.skip or lane_right.skip):
+        # 6th stage, draw lanes on the warped images
+        lanes = lane_plot((warped.shape[0], warped.shape[1], 3))
 
-    # 7th stages, apply reverse perspective transform to get images with detected lanes and statistics plotted
-    lanes_unwarped = cv2.warpPerspective(lanes, M_inv, (lanes.shape[1], lanes.shape[0]), flags=cv2.INTER_LINEAR)
-    output = cv2.addWeighted(image, 1, lanes_unwarped, 0.35, 0)
-    rad_curv_avg = (lane_left.radius_of_curvature + lane_right.radius_of_curvature) / 2
-    loc_avg = (lane_left.line_base_pos + lane_right.line_base_pos) / 2
-    # Add curvature into the output image
-    output = cv2.putText(output,
-                         'Curvature: {:.3f}m'.format(rad_curv_avg),
-                         org=(460, 650),
-                         fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                         fontScale=1,
-                         color=(255, 255, 255),
-                         thickness=2)
-    # Add vehicle location into the output image
-    output = cv2.putText(output,
-                         'Vehicle location: {:.3f}m'.format(loc_avg),
-                         org=(425, 600),
-                         fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                         fontScale=1,
-                         color=(255, 255, 255),
-                         thickness=2)
+        # 7th stages, apply reverse perspective transform to get images with detected lanes and statistics plotted
+        lanes_unwarped = cv2.warpPerspective(lanes, M_inv, (lanes.shape[1], lanes.shape[0]), flags=cv2.INTER_LINEAR)
+        output = cv2.addWeighted(image, 1, lanes_unwarped, 0.35, 0)
+        rad_curv_avg = (lane_left.radius_of_curvature + lane_right.radius_of_curvature) / 2
+        loc_avg = (lane_left.line_base_pos + lane_right.line_base_pos) / 2
+        # Add curvature into the output image
+        output = cv2.putText(output,
+                             'Curvature: {:.3f}m'.format(rad_curv_avg),
+                             org=(460, 650),
+                             fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                             fontScale=1,
+                             color=(255, 255, 255),
+                             thickness=2)
+        # Add vehicle location into the output image
+        output = cv2.putText(output,
+                             'Vehicle location: {:.3f}m'.format(loc_avg),
+                             org=(425, 600),
+                             fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                             fontScale=1,
+                             color=(255, 255, 255),
+                             thickness=2)
+    else:
+        output = image
+        lane_left.skip = False
+        lane_right.skip = False
+
     return output
 
 

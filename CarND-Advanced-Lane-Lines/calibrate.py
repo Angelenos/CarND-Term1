@@ -19,7 +19,7 @@ objp = np.zeros((ny * nx, 3), np.float32)
 objp[:, :2] = np.mgrid[0:nx, 0:ny].T.reshape(-1, 2)
 
 # Adopt glob function to read all calibration images
-images = glob.glob('./camera_cal/calibration*.jpg')
+images = glob.glob('./camera_cal/calibration[1-5].jpg')
 for image in images:
     # Load calibration image
     img = cv2.imread(image)
