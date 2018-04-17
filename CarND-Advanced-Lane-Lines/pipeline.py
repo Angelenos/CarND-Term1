@@ -40,19 +40,20 @@ class Line:
 cam_mtx = 0
 dist_coef = 0
 ksize = 5
-window_width = 50
+window_width = 40
 window_height = 80
-line_width = 28  # Default line width at bottom of the image in pixels
-margin = 3 * line_width
-src_pts = np.float32([(237, 690), (1043, 690), (678, 445), (601, 445)])  # Ref pts for Perspective transformation
-dst_pts = np.float32([(300, 720), (980, 720), (980, 0), (300, 0)])  # Ref pts for Perspective transformation
+line_width = 24  # Default line width at bottom of the image in pixels
+margin = 8 * line_width
+src_pts = np.float32([(237, 690), (1043, 690), (682, 450), (590, 450)])  # Ref pts for Perspective transformation
+dst_pts = np.float32([(325, 720), (955, 720), (955, 0), (300, 0)])  # Ref pts for Perspective transformation
 lane_width = dst_pts[1][0] - dst_pts[0][0]  # Default lane width at bottom of the image in pixels
-ym_per_pix = 30 / 720  # meters per pixel in y dimension
+ym_per_pix = 30 / dst_pts[0][1]  # meters per pixel in y dimension
 xm_per_pix = 3.7 / lane_width  # meters per pixel in x dimension
 curv_thresh = 3  # Curvature threshold for lane validation
-fit_thresh = 4  # Fit threshold for lane validation
-lane_thresh = 500  # Valid lane threshold after convolution
-num_it = 5  # Store result from last 5 iterations
+fit_thresh = 11  # Fit threshold for lane validation
+lane_thresh = 200  # Valid lane threshold after convolution
+res_thresh = 3000  # Threshold for the residual after polynomial fit
+num_it = 6  # Store result from last 5 iterations
 num_layer = 9  # Default number of sliding layers
 lane_left = Line()
 lane_right = Line()
@@ -118,8 +119,10 @@ def hls_select(img, thresh=(0, 255)):
 
 
 def curvature_cal(x, y):
+    if len(x) != len(y):
+        print('No!!!')
     fit = np.polyfit(y * ym_per_pix, x * xm_per_pix, 2)
-    curv = ((1 + (2 * fit[0] * 720 * ym_per_pix + fit[1]) ** 2) ** 1.5) / np.absolute(2 * fit[0])
+    curv = ((1 + (2 * fit[0] * dst_pts[0][1] * ym_per_pix + fit[1]) ** 2) ** 1.5) / np.absolute(2 * fit[0])
     return curv
 
 
@@ -143,6 +146,8 @@ def lane_filter(image):
 
 def slide_windows(image):
     window = np.ones(window_width)  # Create our window template that we will use for convolutions
+    draw_image = np.zeros((image.shape[0], image.shape[1], 3)) + 255  # Debug
+    draw_image[image == 1] = (0, 0, 255)  # Debug
     # First find the two starting positions for the left and right lane by using np.sum to get the vertical image slice
     # and then np.convolve the vertical image slice with the window template
     # Sum quarter bottom of image to get slice, could use a different ratio
@@ -154,16 +159,18 @@ def slide_windows(image):
     r_max = np.max(np.convolve(window, r_sum))
     if l_max > lane_thresh or r_max > lane_thresh:
         if l_max < lane_thresh:
-            l_center = r_center - lane_width
+            l_center = int(r_center - lane_width)
         elif r_max < lane_thresh:
-            r_center = l_center + lane_width
+            r_center = int(l_center + lane_width)
         # Add what we found for that layer
     else:
         # If both lanes can not be detected at the bottom of images, push the default value 300 and 980 (based on
         # perspective transform) into the list of window centroids
         if lane_left.detected or lane_right.detected:
-            l_center = 322
-            r_center = 958
+            l_center = int(dst_pts[0][0])
+            r_center = int(dst_pts[1][0])
+    draw_image = cv2.circle(draw_image, (int(l_center), 720), int(line_width / 2), color=(255, 0, 0), thickness=6)  # Debug
+    draw_image = cv2.circle(draw_image, (int(l_center), 720), int(line_width / 2), color=(255, 0, 0), thickness=6)  # Debug
 
     lane_left.allx = np.array([l_center], dtype=float)
     lane_right.allx = np.array([r_center], dtype=float)
@@ -183,66 +190,82 @@ def slide_windows(image):
         # Find the best left centroid by using past left center as a reference
         # Use window_width/2 as offset because convolution signal reference is at right side of window,
         # not center of window
-        offset = int((window_width + window_width_cor) / 2)
+        offset = int(window_width / 2)
         l_min_index = int(max(l_center + offset - margin, 0))
         l_max_index = int(min(l_center + offset + margin, image.shape[1]))
+        if l_min_index >= l_max_index:
+            l_max_index = int(l_min_index + lane_width)
         l_center = np.argmax(conv_signal[l_min_index:l_max_index]) + l_min_index - offset
         l_max = np.max(conv_signal[l_min_index:l_max_index])
         # Find the best right centroid by using past right center as a reference
         r_min_index = int(max(r_center + offset - margin, 0))
         r_max_index = int(min(r_center + offset + margin, len(conv_signal)))
         if r_min_index >= r_max_index:
-            r_min_index = r_max_index - lane_width
+            r_min_index = int(r_max_index - lane_width)
         r_center = np.argmax(conv_signal[r_min_index:r_max_index]) + r_min_index - offset
         r_max = np.max(conv_signal[r_min_index:r_max_index])
         # Determine if the maximal value from left/right lanes are < 1, which indicates no lane segments found in this
         # slide of image
-        if l_max > lane_thresh or r_max > lane_thresh or (r_center - l_center <= lane_width * 0.9) or \
-                (r_center - l_center >= lane_width * 1.1):
+        if (l_max > lane_thresh) or (r_max > lane_thresh):
             if l_max < lane_thresh:
                 if lane_left.bestx is not None:
-                    l_center = r_center - (lane_right.bestx[level] - lane_left.bestx[level])
+                    l_center = r_center - int(lane_right.bestx[level] - lane_left.bestx[level])
                 else:
                     l_center = r_center - lane_width
             elif r_max < lane_thresh:
                 if lane_right.bestx is not None:
-                    r_center = l_center + (lane_right.bestx[level] - lane_left.bestx[level])
+                    r_center = l_center + int(lane_right.bestx[level] - lane_left.bestx[level])
                 else:
                     r_center = l_center + lane_width
-            elif (r_center - l_center <= lane_width * 0.9) or (r_center - l_center >= lane_width * 1.1):
-                if l_max < r_max:
-                    if lane_left.bestx is not None:
-                        l_center = r_center - (lane_right.bestx[level] - lane_left.bestx[level])
+            elif (r_center - l_center <= lane_width * 0.85) or (r_center - l_center >= lane_width * 1.15):
+                if lane_left.bestx is not None and lane_right.bestx is not None:
+                    l_center_pred = lane_left.best_fit[0] * (image.shape[0] - level * window_height) ** 2 + \
+                                    lane_left.best_fit[1] * (image.shape[0] - level * window_height) + \
+                                    lane_left.best_fit[2]
+                    r_center_pred = lane_right.best_fit[0] * (image.shape[0] - level * window_height) ** 2 + \
+                                    lane_right.best_fit[1] * (image.shape[0] - level * window_height) + \
+                                    lane_right.best_fit[2]
+                    if np.abs(l_center_pred - l_center) > np.abs(r_center_pred - r_center):
+                        l_center = int(l_center_pred)
                     else:
-                        l_center = r_center - lane_width
+                        r_center = int(r_center_pred)
                 else:
-                    if lane_right.bestx is not None:
-                        r_center = l_center + (lane_right.bestx[level] - lane_left.bestx[level])
+                    if l_max > r_max:
+                        r_center = int(l_center + lane_width)
                     else:
-                        r_center = l_center + lane_width
+                        l_center = int(r_center - lane_width)
             # Add what we found for that layer
             lane_left.allx = np.append(lane_left.allx, [float(l_center)])
             lane_right.allx = np.append(lane_right.allx, [float(r_center)])
             lane_left.ally = np.append(lane_left.ally, [float(image.shape[0] - level * window_height)])
             lane_right.ally = np.append(lane_right.ally, [float(image.shape[0] - level * window_height)])
+        draw_image = cv2.circle(draw_image, (int(l_center), image.shape[0] - level * window_height),
+                                int(line_width / 2), color=(255, 0, 0), thickness=6)  # Debug
+        draw_image = cv2.circle(draw_image, (int(r_center), image.shape[0] - level * window_height),
+                                int(line_width / 2), color=(255, 0, 0), thickness=6)  # Debug
 
+    cv2.imwrite('output_images\debug\\warped_pts.jpg', draw_image)
     # If any of the lane is detected
-    if len(lane_right.allx) == len(lane_left.allx) > 3:
+    if len(lane_right.allx) == len(lane_left.allx) == num_layer:
         lane_left.detected = True
         lane_right.detected = True
-        fit_left = np.polyfit(lane_left.ally, lane_left.allx, 2)
-        fit_right = np.polyfit(lane_right.ally, lane_right.allx, 2)
-
-        if len(lane_left.current_fit) == len(lane_right.current_fit) == 0:
-            lane_left.diffs = fit_left
-            lane_right.diffs = fit_right
+        fit_left = np.polyfit(lane_left.ally, lane_left.allx, 2, full=True)
+        fit_right = np.polyfit(lane_right.ally, lane_right.allx, 2, full=True)
+        if (fit_left[1][0] > res_thresh or fit_right[1][0] > res_thresh) and \
+                len(lane_left.current_fit) == len(lane_right.current_fit) > 0:
+            lane_left.detected = False
+            lane_right.detected = False
         else:
-            lane_left.diffs = [fit_left[i] - lane_left.current_fit[i] for i in range(len(fit_left))]
-            lane_right.diffs = [fit_right[i] - lane_right.current_fit[i] for i in range(len(fit_right))]
-        lane_left.current_fit = fit_left
-        lane_right.current_fit = fit_right
-        lane_left.radius_of_curvature = curvature_cal(lane_left.allx, lane_left.ally)
-        lane_right.radius_of_curvature = curvature_cal(lane_right.allx, lane_right.ally)
+            if len(lane_left.current_fit) == len(lane_right.current_fit) == 0:
+                lane_left.diffs = fit_left[0]
+                lane_right.diffs = fit_right[0]
+            else:
+                lane_left.diffs = [fit_left[0][i] - lane_left.current_fit[i] for i in range(len(fit_left[0]))]
+                lane_right.diffs = [fit_right[0][i] - lane_right.current_fit[i] for i in range(len(fit_right[0]))]
+            lane_left.current_fit = fit_left[0]
+            lane_right.current_fit = fit_right[0]
+            lane_left.radius_of_curvature = curvature_cal(lane_left.allx, lane_left.ally)
+            lane_right.radius_of_curvature = curvature_cal(lane_right.allx, lane_right.ally)
     else:
         lane_left.detected = False
         lane_right.detected = False
@@ -258,8 +281,9 @@ def lane_valid():
         curv_comp = np.max([np.abs((curv_left - curv_right)/curv_left), np.abs((curv_left - curv_right)/curv_right)])
         fit_comp = np.max([np.abs((fit_left[0] - fit_right[0])/fit_left[0]),
                            np.abs((fit_left[0] - fit_right[0])/fit_right[0])])
-        res = (curv_comp < curv_thresh) & (fit_comp < fit_thresh) & (len(lane_left.allx) == num_layer) & \
-              (len(lane_right.allx) == num_layer)
+        fit_diff = np.max([np.abs(lane_left.diffs[0] / (lane_right.diffs[0] + 1e-7)),
+                          np.abs(lane_right.diffs[0] / (lane_left.diffs[0] + 1e-7))])
+        res = (curv_comp < curv_thresh) & (fit_diff < fit_thresh)
 
         if res:
             # Check if length of Line.allx list is the same as number of layers. If not use the average polynomial fit
@@ -288,29 +312,35 @@ def lane_valid():
             lane_right.current_fit = lane_right.best_fit
         else:
             lane_left.detected = lane_right.detected = False
-            lane_left.allx = lane_left.bestx
-            lane_right.allx = lane_right.bestx
-            lane_left.ally = np.linspace(720, window_height, num_layer)
-            lane_right.ally = np.linspace(720, window_height, num_layer)
+            lane_left.allx = np.int_(lane_left.bestx)
+            lane_right.allx = np.int_(lane_right.bestx)
+            lane_left.ally = np.linspace(dst_pts[0][1], window_height, num_layer)
+            lane_right.ally = np.linspace(dst_pts[0][1], window_height, num_layer)
             lane_left.current_fit = lane_left.best_fit
             lane_right.current_fit = lane_right.best_fit
+            lane_left.diffs = [lane_left.best_fit - lane_left.recent_fit[-1][i]
+                               for i in range(len(lane_left.best_fit))]
+            lane_right.diffs = [lane_right.best_fit - lane_right.recent_fit[-1][i]
+                                for i in range(len(lane_right.best_fit))]
             lane_left.radius_of_curvature = curvature_cal(lane_left.allx, lane_left.ally)
             lane_right.radius_of_curvature = curvature_cal(lane_right.allx, lane_right.ally)
     else:
         if len(lane_left.recent_fit) == len(lane_right.recent_fit) > 0:
-            lane_left.allx = lane_left.bestx
-            lane_right.allx = lane_right.bestx
+            lane_left.allx = np.int_(lane_left.bestx)
+            lane_right.allx = np.int_(lane_right.bestx)
+            lane_left.ally = np.linspace(dst_pts[0][1], window_height, len(lane_left.allx))
+            lane_right.ally = np.linspace(dst_pts[0][1], window_height, len(lane_right.allx))
             lane_left.current_fit = lane_left.best_fit
             lane_right.current_fit = lane_right.best_fit
             lane_left.radius_of_curvature = curvature_cal(lane_left.allx, lane_left.ally)
             lane_right.radius_of_curvature = curvature_cal(lane_right.allx, lane_right.ally)
         else:
             return
-    lane_left.line_base_pos = ((lane_left.current_fit[0] * (720 ** 2)) +
-                               (lane_left.current_fit[1] * 720) +
+    lane_left.line_base_pos = ((lane_left.current_fit[0] * (dst_pts[0][1] ** 2)) +
+                               (lane_left.current_fit[1] * dst_pts[0][1]) +
                                (lane_left.current_fit[2] - dst_pts[0][0])) * xm_per_pix
-    lane_right.line_base_pos = ((lane_right.current_fit[0] * (720 ** 2)) +
-                                (lane_right.current_fit[1] * 720) +
+    lane_right.line_base_pos = ((lane_right.current_fit[0] * (dst_pts[0][1] ** 2)) +
+                                (lane_right.current_fit[1] * dst_pts[0][1]) +
                                 (lane_right.current_fit[2] - dst_pts[1][0])) * xm_per_pix
 
 
