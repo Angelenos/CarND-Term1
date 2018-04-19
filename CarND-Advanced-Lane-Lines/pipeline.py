@@ -64,7 +64,7 @@ curv_thresh = 3  # Curvature threshold for lane validation
 fit_thresh = 6  # Threshold when compared the 2nd order polynomial coefficients with the previous fit
 lane_thresh = 200  # Valid lane threshold after convolution
 res_thresh = 4500  # Threshold for the residual after polynomial fit
-fail_thresh = 6
+fail_thresh = 7  # Threshold for the fail counters in Line class to skip cross compare steps in lane_valid()
 num_it = 6  # Store result from last 6 iterations
 num_layer = 9  # Default number of sliding layers
 # Line objectes for left and right lanes
@@ -138,7 +138,7 @@ def s_select(img, thresh=(0, 255)):
 def l_select(img, thresh=(0, 255)):
     # 1) Convert image in RGB to HLS color space
     hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS)
-    # 2) Pick the S channel
+    # 2) Pick the L channel
     l_channel = hls[:, :, 1]
     # 3) Make a gray scale copy of the source image
     binary_output = np.zeros_like(l_channel)
@@ -163,26 +163,17 @@ def lane_filter(image):
     dir_binary = dir_threshold(gray, sobel_kernel=ksize, thresh=(0.8, 1.4))
     s_binary = s_select(image, thresh=(140, 255))
     l_binary = l_select(image, thresh=(90, 255))
-    cv2.imwrite('output_images/debug/gradx.jpg', gradx * 255)  # Debug
-    cv2.imwrite('output_images/debug/grady.jpg', grady * 255)  # Debug
-    cv2.imwrite('output_images/debug/mag_binary.jpg', mag_binary * 255)  # Debug
-    cv2.imwrite('output_images/debug/dir_binary.jpg', dir_binary * 255)  # Debug
-    cv2.imwrite('output_images/debug/l_binary.jpg', l_binary * 255)  # Debug
-    cv2.imwrite('output_images/debug/s_binary.jpg', s_binary * 255)  # Debug
     combined = np.zeros_like(dir_binary)
     # Combine results from all detection results above
     # Here results from gradx, grady, mag_binary and dir_binary are calculated by operation "and" and then take "or"
-    # operation with the results from "HLS_binary" to give as clean result as possible
+    # operation with the results from "S_binary" and "L_binary" to give as clean result as possible
     combined[((gradx == 1) & (grady == 1) & (mag_binary == 1) & (dir_binary == 1)) |
              ((s_binary == 1) & (l_binary == 1))] = 1
-    cv2.imwrite('output_images/debug/filtered.jpg', combined * 255)  # Debug
     return combined
 
 
 def slide_windows(image):
     window = np.ones(window_width)  # Create our window template that we will use for convolutions
-    draw_image = np.zeros((image.shape[0], image.shape[1], 3)) + 255  # debug
-    draw_image[image == 1] = (255, 0, 0)  # debug
     # First find the two starting positions for the left and right lane by using np.sum to get the vertical image slice
     # and then np.convolve the vertical image slice with the window template
     # Sum quarter bottom of image to get slice, could use a different ratio
@@ -209,10 +200,6 @@ def slide_windows(image):
     lane_right.allx = np.array([r_center], dtype=float)
     lane_left.ally = np.array([image.shape[0]], dtype=float)
     lane_right.ally = np.array([image.shape[0]], dtype=float)
-    draw_image = cv2.circle(draw_image, center=(int(l_center), int(image.shape[0])), radius=10, color=(0, 0, 255),
-                            thickness=5)  # debug
-    draw_image = cv2.circle(draw_image, center=(int(r_center), int(image.shape[0])), radius=10, color=(0, 0, 255),
-                            thickness=5)  # debug
 
     # Go through each layer looking for max pixel locations
     for level in range(1, int(image.shape[0] / window_height)):
@@ -241,8 +228,10 @@ def slide_windows(image):
             r_min_index = int(r_max_index - lane_width)
         r_center = np.argmax(conv_signal[r_min_index:r_max_index]) + r_min_index - offset
         r_max = np.max(conv_signal[r_min_index:r_max_index])
-        # Determine if the maximal value from left/right lanes are < 1, which indicates no lane segments found in this
-        # slide of image
+        # Determine if the lane centers found are valid by looking into the
+        # 1) intensity of window scanned result
+        # 2) Difference between detected center and the one predicted by the best_fit from previous "num_it" of
+        #    successful detection
         if (l_max < lane_thresh) or (r_max < lane_thresh) or (r_center - l_center <= lane_width * 0.85) or \
            (r_center - l_center >= lane_width * 1.15):
             if lane_left.bestx is not None and lane_right.bestx is not None:
@@ -252,6 +241,7 @@ def slide_windows(image):
                 r_center_pred = (lane_right.best_fit[0] * (image.shape[0] - level * window_height) ** 2) + \
                                 (lane_right.best_fit[1] * (image.shape[0] - level * window_height)) + \
                                 (lane_right.best_fit[2])
+                # If any of the lane centers are not valid, mark it as -1
                 if np.abs(l_center_pred - l_center) > 2 * line_width:
                     l_center = -1
                 if np.abs(r_center_pred - r_center) > 2 * line_width:
@@ -261,8 +251,8 @@ def slide_windows(image):
                     r_center = int(l_center + lane_width)
                 else:
                     l_center = int(r_center - lane_width)
-
-        # Add what we found for that layer
+        # Append only valid lane centers in to the allx list
+        # For invalid points, assign the value from bestx in the same layer as the starting point of next layer's scan
         if l_center > 0:
             lane_left.allx = np.append(lane_left.allx, [float(l_center)])
             lane_left.ally = np.append(lane_left.ally, [float(image.shape[0] - level * window_height)])
@@ -273,20 +263,14 @@ def slide_windows(image):
             lane_right.ally = np.append(lane_right.ally, [float(image.shape[0] - level * window_height)])
         else:
             r_center = lane_right.bestx[level]
-        draw_image = cv2.circle(draw_image, center=(int(l_center), int(image.shape[0] - level * window_height)),
-                                radius=10, color=(0, 0, 255), thickness=5)  # debug
-        draw_image = cv2.circle(draw_image, center=(int(r_center), int(image.shape[0] - level * window_height)),
-                                radius=10, color=(0, 0, 255), thickness=5)  # debug
 
-    cv2.imwrite('output_images/debug/warped_pts.jpg', draw_image)  # debug
-
-    # This is the primary sanity check integrated in the window sliding
-    if len(lane_left.allx) > int(num_layer * 0.7):  # If each sliding layer gives valid result
+    # Check if sufficient valid lane segments are detected from sliding windows to calculate polymonial fit
+    if len(lane_left.allx) > int(num_layer * 0.7):
         lane_left.detected = True
     else:
         lane_left.detected = False
 
-    if len(lane_right.allx) > int(num_layer * 0.7):  # If each sliding layer gives valid result
+    if len(lane_right.allx) > int(num_layer * 0.7):
         lane_right.detected = True
     else:
         lane_right.detected = False
@@ -294,7 +278,8 @@ def slide_windows(image):
 
 def lane_valid():
     # Function to check the sanity of lane detection results
-    # Primary sanity check on left lane
+    # This inspection consists of 3 steps: Primary check, Cross compare and Final action
+    # Primary sanity check on left lane based on residues from fitting
     if lane_left.detected is True:
         fit_left = np.polyfit(lane_left.ally, lane_left.allx, 2, full=True)
         lane_left.radius_of_curvature = curvature_cal(lane_left.allx, lane_left.ally)
@@ -305,7 +290,7 @@ def lane_valid():
                 lane_left.diffs = fit_left[0]
             else:
                 lane_left.diffs = [fit_left[0][i] - lane_left.recent_fit[-1][i] for i in range(len(fit_left[0]))]
-    # Primary sanity check on right lane
+    # Primary sanity check on right lane based on residues from fitting
     if lane_right.detected is True:
         fit_right = np.polyfit(lane_right.ally, lane_right.allx, 2, full=True)
         lane_right.radius_of_curvature = curvature_cal(lane_right.allx, lane_right.ally)
@@ -317,6 +302,10 @@ def lane_valid():
             else:
                 lane_right.diffs = [fit_right[0][i] - lane_right.recent_fit[-1][i] for i in range(len(fit_right[0]))]
     # Cross compare results from both lanes
+    # If both lanes are valid, coefficients of polynomial fit will be recorded
+    # If only one of the lane is valid, coefficients from the valid lane will be used to predict the others by adding/
+    # substrating lane width from the constant coefficient
+    # If both lanes are invalid, move to the third steps
     if lane_left.detected is True and lane_right.detected is True:
         curv_left = lane_left.radius_of_curvature
         curv_right = lane_right.radius_of_curvature
@@ -347,7 +336,10 @@ def lane_valid():
                           (lane_left.current_fit[1] * lane_left.ally) + \
                           (lane_left.current_fit[2])
         lane_left.detected = True
-    #
+    # Final actions based on the first 2 steps of inspections
+    # For valid lane results including allx/ally, coefficients from fitting will be recorded and averaged with the
+    # previous "num_it" times of valid dectection
+    # For invalid lane results, the averaged one from previous "num_it" dectection will overwrite them
     if lane_left.detected is True:
         # Check if lane.allx and lane.ally have exactly "num_layer" items. If not, use the acquired fit to make up the
         # Missing items
@@ -385,6 +377,7 @@ def lane_valid():
         # Reset fail counters
         lane_left.fail_cntr = 0
     else:
+        # Increment the fail counter on the corresponding lane by 1
         lane_left.fail_cntr += 1
         if len(lane_left.recent_fit) > 0:
             lane_left.allx = np.int_(lane_left.bestx)
@@ -431,6 +424,7 @@ def lane_valid():
         # Reset fail counters
         lane_right.fail_cntr = 0
     else:
+        # Increment the fail counter on the corresponding lane by 1
         lane_right.fail_cntr += 1
         if len(lane_right.recent_fit) > 0:
             lane_right.allx = np.int_(lane_right.bestx)
@@ -441,13 +435,13 @@ def lane_valid():
             lane_right.skip = True
     # Calculate the line base position with the recovered results
     if not lane_left.skip:
-        lane_left.line_base_pos = ((lane_left.current_fit[0] * (dst_pts[0][1] ** 2)) +
-                                   (lane_left.current_fit[1] * dst_pts[0][1]) +
-                                   (lane_left.current_fit[2] - dst_pts[0][0])) * xm_per_pix
+        lane_left.line_base_pos = np.float(((lane_left.current_fit[0] * (dst_pts[0][1] ** 2)) +
+                                            (lane_left.current_fit[1] * dst_pts[0][1]) +
+                                            (lane_left.current_fit[2] - dst_pts[0][0])) * xm_per_pix)
     if not lane_right.skip:
-        lane_right.line_base_pos = ((lane_right.current_fit[0] * (dst_pts[0][1] ** 2)) +
-                                    (lane_right.current_fit[1] * dst_pts[0][1]) +
-                                    (lane_right.current_fit[2] - dst_pts[0][0])) * xm_per_pix
+        lane_right.line_base_pos = np.float(((lane_right.current_fit[0] * (dst_pts[0][1] ** 2)) +
+                                            (lane_right.current_fit[1] * dst_pts[0][1]) +
+                                            (lane_right.current_fit[2] - dst_pts[1][0])) * xm_per_pix)
 
 
 def lane_plot(shape):
@@ -470,7 +464,6 @@ def lane_plot(shape):
     cv2.fillPoly(lanes, left_lane, (255, 0, 0))
     # Plot right lane in red
     cv2.fillPoly(lanes, right_lane, (255, 0, 0))
-    cv2.imwrite('output_images/debug/lanes.jpg', lanes)
     return lanes
 
 
@@ -479,7 +472,6 @@ def pipeline(image):
     # Position of lanes, curvature and vehicle position relative to lanes
     # 1st stage, get undistorted images
     undist = cv2.undistort(image, cam_mtx, dist_coef, None, cam_mtx)
-    cv2.imwrite('output_images/debug/input.jpg', undist)  # debug
 
     # 2nd stage, filter out the possible lanes in the images
     filtered = lane_filter(undist)
@@ -488,7 +480,6 @@ def pipeline(image):
     M = cv2.getPerspectiveTransform(src_pts, dst_pts)
     M_inv = cv2.getPerspectiveTransform(dst_pts, src_pts)
     warped = cv2.warpPerspective(filtered, M, (filtered.shape[1], filtered.shape[0]), flags=cv2.INTER_LINEAR)
-    cv2.imwrite('output_images/debug/warped.jpg', warped * 255)
 
     # 4th stage, Adopt convolution method to determine details about lane
     slide_windows(warped)
@@ -504,21 +495,24 @@ def pipeline(image):
         # 7th stages, apply reverse perspective transform to get images with detected lanes and statistics plotted
         lanes_unwarped = cv2.warpPerspective(lanes, M_inv, (lanes.shape[1], lanes.shape[0]), flags=cv2.INTER_LINEAR)
         output = cv2.addWeighted(image, 1, lanes_unwarped, 0.35, 0)
-        cv2.imwrite('output_images/debug/output.jpg', output)  # Debug
         rad_curv_avg = (lane_left.radius_of_curvature + lane_right.radius_of_curvature) / 2
         loc_avg = (lane_left.line_base_pos + lane_right.line_base_pos) / 2
         # Add curvature into the output image
         output = cv2.putText(output,
                              'Curvature: {:.3f}m'.format(rad_curv_avg),
-                             org=(460, 650),
+                             org=(500, 600),
                              fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                              fontScale=1,
                              color=(255, 255, 255),
                              thickness=2)
         # Add vehicle location into the output image
+        if loc_avg < 0:
+            loc_string = 'Vehicle location: {:.3f}m to the left'.format(-loc_avg)
+        else:
+            loc_string = 'Vehicle location: {:.3f}m to the right'.format(loc_avg)
         output = cv2.putText(output,
-                             'Vehicle location: {:.3f}m'.format(loc_avg),
-                             org=(425, 600),
+                             loc_string,
+                             org=(400, 650),
                              fontFace=cv2.FONT_HERSHEY_SIMPLEX,
                              fontScale=1,
                              color=(255, 255, 255),
@@ -557,7 +551,7 @@ if __name__ == "__main__":
             print('Can''t find images')
             sys.exit(-1)
     elif '.mp4' in file_input[-1]:
-        clip1 = VideoFileClip(f_input).subclip(37, 43)
+        clip1 = VideoFileClip(f_input)  # .subclip(38, 42)
         lane_clip = clip1.fl_image(pipeline)
         lane_clip.write_videofile(output_file, audio=False)
     else:
