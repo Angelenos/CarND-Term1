@@ -1,7 +1,6 @@
 import numpy as np
 import cv2
 from skimage.feature import hog
-from scipy.ndimage.measurements import label
 
 
 def convert_color(img, conv='RGB2YCrCb'):
@@ -81,8 +80,7 @@ def draw_labeled_bboxes(img, labels):
         nonzerox = np.array(nonzero[1])
         # Define a bounding box based on min/max x and y
         bbox = ((np.min(nonzerox), np.min(nonzeroy)), (np.max(nonzerox), np.max(nonzeroy)))
-        if min(bbox[1][0] - bbox[0][0], bbox[1][1] - bbox[0][1]) >= 32:
-            # Draw the box on the image
+        if np.min([np.abs(bbox[1][0] - bbox[0][0]), np.abs(bbox[1][1] - bbox[0][1])]) > 25:
             cv2.rectangle(img, bbox[0], bbox[1], (0, 0, 255), 6)
     # Return the image
     return img
